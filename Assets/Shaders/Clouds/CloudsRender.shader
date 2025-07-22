@@ -22,9 +22,14 @@ Shader "Clouds/CloudsRender"
                 #define CLOUD_LAYER_END float(5000.0)
                 #define CLOUD_VOLUME_THICKNESS (CLOUD_LAYER_END - CLOUD_LAYER_BEGIN)
                 #define CLOUD_SCALE (1.0 / CLOUD_LAYER_END)
-                #define CLOUDS_AMBIENT_TOP float3(255, 255, 255) * (1.5 / 255.0)
-                #define CLOUDS_AMBIENT_BOTTOM float3(132, 170, 208) * (1.0 / 255.0)
+                #define CLOUDS_AMBIENT_TOP float3(255, 255, 255) * (1. / 255.0)
+                #define CLOUDS_AMBIENT_BOTTOM float3(132, 170, 208) * (1. / 255.0)
                 #define PLANET_CENTER float3(0, 0, 0)
+
+                #define AO_STRENGTH 5.0
+                #define AO_DIST_1 64.0
+                #define AO_DIST_2 128.0
+                #define AO_DIST_3 256.0
 
                 // x: scale
                 // y,z : x, y offsets
@@ -89,7 +94,7 @@ Shader "Clouds/CloudsRender"
                     pos += (float3(1.0, 0, 0) + float3(0.0, 0.1, 0.0)) * (_Time.y) * 10.0;
                     pos *= CLOUD_SCALE;
 
-                    float4 lowFreqNoises = _CloudBase.Sample(sampler_CloudBase, pos * 1.4).rgba;
+                    float4 lowFreqNoises = _CloudBase.Sample(sampler_CloudBase, pos).rgba;
                     float lowFreqFBM = 
                         (lowFreqNoises.g * 0.625) + 
                         (lowFreqNoises.b * 0.125) + 
@@ -99,7 +104,7 @@ Shader "Clouds/CloudsRender"
                     baseCloud *= layerDensity;
 
                     float cloudCoverage = weatherData.r;
-                    float cloudProbability = saturate(cloudCoverage - 0.001);
+                    float cloudProbability = (cloudCoverage - 0.001) * (1.0 / 255.0);
                     float baseCloudWithCoverage = remap(baseCloud, cloudProbability, 1.0, 0.0, 1.0);
                     baseCloudWithCoverage *= cloudCoverage;
 
@@ -142,19 +147,22 @@ Shader "Clouds/CloudsRender"
                         densityAlongCone += max(0, sampleCloudDensity(pos, heightFrac, weatherData));
                     }
 
-                    return densityAlongCone * lightStepSize;
+                    return exp(-densityAlongCone * lightStepSize);
                 }
 
-                float computeLightEnergy(float lightDensity, float mu, float precipitation) {
-                    float scatterAmount = lerp(0.008, 1.0, smoothstep(0.96, 0.0, mu));
-                    // float beers = exp(-lightDensity * precipitation);
-                    float beers = exp(-lightDensity * precipitation) 
-                                + 0.5 * scatterAmount * exp(-0.1 * lightDensity) 
-                                + scatterAmount * 0.4 * exp(-0.02 * lightDensity);
-                    float powder = 1.0 - exp(-lightDensity * 2.0);
+                float3 computeCloudScattering(float cloudDensity, float lightVis, float mu, float3 sunLight, float ao, float heightFrac) {
+                    lightVis *= pow(cloudDensity, 0.9);
+                    float integral = calculateScatterIntergral(cloudDensity, 1.11);
+                    float3 ambient = lerp(CLOUDS_AMBIENT_BOTTOM, CLOUDS_AMBIENT_TOP, heightFrac);
+                    float sunHeight = saturate(GetMainLight().direction.y);
+                    float sunAttenuation = saturate(pow(sunHeight + 0.1, 1.4));
+                    float beers = exp(-cloudDensity);
                     float phase = lerp(HenyeyGreenstein(0.8, mu), HenyeyGreenstein(-0.2, mu), 0.5);
 
-                    return 2.0 * beers * powder * phase;
+                    float3 sunLightning = sunLight * lightVis * beers * (PI / 2.0) * 2.0; 
+                    float3 skyLightning = pow(ambient * ao * sunAttenuation, 0.35);
+
+                    return (skyLightning + sunLightning) * integral;
                 }
 
                 float4 compute(float3 traceStart, float3 traceEnd, float3 eyeDir) {
@@ -167,7 +175,6 @@ Shader "Clouds/CloudsRender"
                     float stepSize = traceLength / float(sampleCount);
                     float3 pos = traceStart;
                     const Light mainLight = GetMainLight();
-                    float sunHeight = saturate(mainLight.direction.y);
                     float mu = dot(normalize(mainLight.direction), normalize(eyeDir));
                     float3 scattering = float3(0.0, 0.0, 0.0);
                     float transmittance = 1.0;
@@ -177,22 +184,21 @@ Shader "Clouds/CloudsRender"
                         float heightFrac = getHeightFractionForPoint(pos);
                         float3 weatherData = sampleWeather(pos);
 
-                        float cloudDensity = sampleCloudDensity(pos, heightFrac, weatherData);
+                        float cloudDensity = sampleCloudDensity(pos, heightFrac, weatherData) * stepSize;
 
                         if (cloudDensity > 0.001) {
-                            float sunAttenuation = saturate(pow(sunHeight + 0.1, 1.4));
 
-                            float lightDensity = sampleDensityAlongCone(pos, mainLight.direction);
-                            float lightEnergy = computeLightEnergy(lightDensity, mu, 1.0);
+                            float lightVis = sampleDensityAlongCone(pos, mainLight.direction);
 
-                            float3 ambient = lerp(CLOUDS_AMBIENT_BOTTOM, CLOUDS_AMBIENT_TOP, heightFrac);
-                            ambient *= sunAttenuation;
+                            float shadowdist = 0.0;
+                            shadowdist += sampleCloudDensity(pos + float3(0, AO_DIST_1, 0), heightFrac, weatherData);
+                            shadowdist += sampleCloudDensity(pos + float3(0, AO_DIST_2, 0), heightFrac, weatherData);
+                            shadowdist += sampleCloudDensity(pos + float3(0, AO_DIST_3, 0), heightFrac, weatherData);
+                            float ambientOcclusion = exp(-shadowdist * AO_STRENGTH) * 0.3;
 
-                            float T = exp(-cloudDensity * stepSize);
-                            float3 luminance = (ambient + (mainLight.color * 3.0) * lightEnergy) * cloudDensity;
-                            float3 integScatter = (luminance - luminance * T) / cloudDensity;
+                            float T = exp(-cloudDensity);
                             
-                            scattering += transmittance * integScatter;
+                            scattering += transmittance * computeCloudScattering(cloudDensity, lightVis, mu, mainLight.color, ambientOcclusion, heightFrac);
                             transmittance *= T;
 
                             if (transmittance < 0.05) {
@@ -238,9 +244,13 @@ Shader "Clouds/CloudsRender"
                     if (!didHitLowerLayer && !didHitUpperLayer) {
                         return float4(0, 0, 0, 1);
                     }
-
+                    
                     float3 lowerLayerHit = camPos + (eyeDir * lh);
                     float3 upperLayerHit = camPos + (eyeDir * uh); 
+                    
+                    if (distance(camPos.xz, lowerLayerHit.xz) > 40000.0) {
+                        return float4(0, 0, 0, 1);
+                    }
 
                     if (depthPresent && (distance(fragPos, camPos) < distance(lowerLayerHit, camPos))) {
                         return float4(0, 0, 0, 1);
