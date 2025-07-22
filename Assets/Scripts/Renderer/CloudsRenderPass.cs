@@ -1,19 +1,18 @@
-using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 using UnityEngine.Rendering.RenderGraphModule;
+using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering.RenderGraphModule.Util;
-using System.Collections.Generic;
+using UnityEngine;
 
-
-class CloudsRenderPass : ScriptableRenderPass
+public class CloudsRenderPass : ScriptableRenderPass
 {
     private class PassData
     {
-        public RendererListHandle rendererListHandle;
+
     }
 
-    public class CloudsRenderPassData : ContextItem
+    public class CloudsRenderData : ContextItem
     {
         public TextureHandle cloudsRenderTex;
 
@@ -23,98 +22,61 @@ class CloudsRenderPass : ScriptableRenderPass
         }
     }
 
-    private LayerMask cloudsLayer;
-    private LayerMask defaultCamMask;
-    private List<ShaderTagId> shaderTagIds = new List<ShaderTagId>();
+    private const string renderPassName = "Volumetric Clouds Render Pass";
+    private const string renderTexName = "Volumetric Clouds Render Texture";
+    private Material renderMat;
+    private Texture3D cloudBase;
+    private Texture3D cloudDetail;
+    private Texture2D curlNoise;
+    private Texture2D densityLUT;
+    private Texture2D weatherData;
 
-    public CloudsRenderPass(LayerMask cloudsLayer)
+    public CloudsRenderPass(
+        Material renderMat,
+        Texture3D cloudBase, Texture3D cloudDetail, Texture2D curlNoise,
+        Texture2D densityLUT, Texture2D weatherData)
     {
-        this.cloudsLayer = cloudsLayer;
-    }
-
-    private void InitRendererList(CullingResults cullResults, ContextContainer frameData, ref PassData passData, RenderGraph renderGraph)
-    {
-        UniversalRenderingData universalRenderingData = frameData.Get<UniversalRenderingData>();
-        UniversalCameraData cameraData = frameData.Get<UniversalCameraData>();
-        UniversalLightData lightData = frameData.Get<UniversalLightData>();
-
-        var sortFlags = cameraData.defaultOpaqueSortFlags;
-        var renderQueueRange = RenderQueueRange.all;
-        var filterSettings = new FilteringSettings(renderQueueRange, cloudsLayer);
-        
-        var forwardOnlyShaderTagIds = new ShaderTagId[]
-        {
-            new ShaderTagId("UniversalForwardOnly"),
-            new ShaderTagId("UniversalForward"),
-            new ShaderTagId("SRPDefaultUnlit"),
-            new ShaderTagId("LightweightForward")
-        };
-
-        shaderTagIds.Clear();
-
-        foreach (ShaderTagId sid in forwardOnlyShaderTagIds)
-        {
-            shaderTagIds.Add(sid);
-        }
-
-        var drawSettings = RenderingUtils.CreateDrawingSettings(shaderTagIds, universalRenderingData, cameraData, lightData, sortFlags);
-        var param = new RendererListParams(cullResults, drawSettings, filterSettings);
-        passData.rendererListHandle = renderGraph.CreateRendererList(param);
-
-        cameraData.camera.cullingMask = defaultCamMask;
+        this.renderMat = renderMat;
+        this.cloudBase = cloudBase;
+        this.cloudDetail = cloudDetail;
+        this.curlNoise = curlNoise;
+        this.densityLUT = densityLUT;
+        this.weatherData = weatherData;
     }
 
     public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
     {
-        const string passName = "Volumetric Clouds Pass";
+        UniversalResourceData resourceData = frameData.Get<UniversalResourceData>();
 
-        using (var builder = renderGraph.AddRasterRenderPass<PassData>(passName, out var passData, profilingSampler))
+        if (resourceData.isActiveTargetBackBuffer)
         {
-            UniversalResourceData resourceData = frameData.Get<UniversalResourceData>();
-
-            if (resourceData.isActiveTargetBackBuffer)
-            {
-                return;
-            }
-
-            CloudsRenderPassData customData = frameData.Create<CloudsRenderPassData>();
-            UniversalCameraData cameraData = frameData.Get<UniversalCameraData>();
-            CullContextData cullContextData = frameData.Get<CullContextData>();
-
-            defaultCamMask = cameraData.camera.cullingMask;
-            cameraData.camera.cullingMask = cloudsLayer;
-
-            cameraData.camera.TryGetCullingParameters(out var cullingParameters);
-            var cullingResults = cullContextData.Cull(ref cullingParameters);
-
-            InitRendererList(cullingResults, frameData, ref passData, renderGraph);
-
-            if (!passData.rendererListHandle.IsValid())
-            {
-                return;
-            }
-
-            builder.UseRendererList(passData.rendererListHandle);
-
-            TextureHandle srcCamTex = resourceData.activeColorTexture;
-            TextureDesc cloudsRenderTexDesc = srcCamTex.GetDescriptor(renderGraph);
-            cloudsRenderTexDesc.name = "Clouds Render Texture";
-            cloudsRenderTexDesc.depthBufferBits = 0;
-            cloudsRenderTexDesc.width /= 4;
-            cloudsRenderTexDesc.height /= 4;
-            cloudsRenderTexDesc.colorFormat = UnityEngine.Experimental.Rendering.GraphicsFormat.R16G16B16A16_SFloat;
-            TextureHandle cloudsRenderTex = renderGraph.CreateTexture(cloudsRenderTexDesc);
-
-            customData.cloudsRenderTex = cloudsRenderTex;
-
-            builder.SetRenderAttachment(cloudsRenderTex, 0);
-            builder.SetRenderFunc((PassData data, RasterGraphContext context) => ExecutePass(data, context));
+            return;
         }
-    }
 
-    static void ExecutePass(PassData data, RasterGraphContext context)
-    {
-        context.cmd.ClearRenderTarget(RTClearFlags.Color, Color.clear, 1, 0);
-        context.cmd.DrawRendererList(data.rendererListHandle);
+        UniversalCameraData cameraData = frameData.Get<UniversalCameraData>();
+        var customData = frameData.Create<CloudsRenderData>();
+
+        TextureHandle cameraColorTex = resourceData.activeColorTexture;
+        TextureHandle cameraDepthTex = resourceData.activeDepthTexture;
+
+        TextureDesc cloudsRenderTexDesc = cameraColorTex.GetDescriptor(renderGraph);
+        cloudsRenderTexDesc.name = renderTexName;
+        cloudsRenderTexDesc.width /= 2;
+        cloudsRenderTexDesc.height /= 2;
+        cloudsRenderTexDesc.depthBufferBits = 0;
+        cloudsRenderTexDesc.colorFormat = GraphicsFormat.R16G16B16A16_UNorm;
+        // cloudsRenderTexDesc.colorFormat = GraphicsFormat.R16G16B16A16_SFloat;
+
+        TextureHandle cloudsRenderTex = renderGraph.CreateTexture(cloudsRenderTexDesc);
+        customData.cloudsRenderTex = cloudsRenderTex;
+
+        renderMat.SetTexture("_CloudBase", cloudBase);
+        renderMat.SetTexture("_CloudDetail", cloudDetail);
+        renderMat.SetTexture("_CurlNoise", curlNoise);
+        renderMat.SetTexture("_DensityLUT", densityLUT);
+        renderMat.SetTexture("_WeatherData", weatherData);
+
+        RenderGraphUtils.BlitMaterialParameters blitParams = new(cameraDepthTex, cloudsRenderTex, renderMat, 0);
+        renderGraph.AddBlitPass(blitParams, renderPassName);
     }
-}
+} 

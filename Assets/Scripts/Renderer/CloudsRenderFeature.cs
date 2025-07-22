@@ -7,55 +7,62 @@ using System;
 public class CloudsRenderFeature : ScriptableRendererFeature
 {
     [Serializable]
-    private class CloudsRenderFeatureSettings
+    public class CloudsRenderFeatureSettings
     {
-        public LayerMask cloudsLayer;
+        public Shader renderShader;
         public Shader blitShader;
-        public Shader blitShaderPancake;
+        public Texture3D cloudBase;
+        public Texture3D cloudDetail;
+        public Texture2D curlNoise;
+        public Texture2D densityLUT;
+        public Texture2D weatherData;
     }
 
-    private CloudsRenderPass cloudsPass;
-    private Material blitMaterial;
-    private CloudsBlitPass blitPass;
-
     [SerializeField]
-    CloudsRenderFeatureSettings settings;
+    private CloudsRenderFeatureSettings settings;
 
-    /// <inheritdoc/>
+    private CloudsRenderPass cloudsRenderPass;
+    private CloudsBlitPass cloudsBlitPass;
+    private Material cloudsRenderMat;
+    private Material cloudsBlitMat;
+
+
     public override void Create()
     {
-        cloudsPass = new CloudsRenderPass(settings.cloudsLayer);
+        cloudsRenderMat = new Material(settings.renderShader);
+        cloudsRenderPass = new CloudsRenderPass(
+            cloudsRenderMat,
+            settings.cloudBase,
+            settings.cloudDetail,
+            settings.curlNoise,
+            settings.densityLUT,
+            settings.weatherData
+        );
 
-        if (UnityEngine.XR.XRSettings.enabled)
-        {
-            blitMaterial = new Material(settings.blitShader);
-        }
-        else
-        {
-            blitMaterial = new Material(settings.blitShaderPancake);
-        }
+        cloudsBlitMat = new Material(settings.blitShader);
+        cloudsBlitPass = new CloudsBlitPass(cloudsBlitMat);
 
-        blitPass = new CloudsBlitPass(blitMaterial);
-
-        cloudsPass.renderPassEvent = RenderPassEvent.AfterRenderingSkybox;
-        blitPass.renderPassEvent = RenderPassEvent.AfterRenderingSkybox;
+        cloudsRenderPass.renderPassEvent = RenderPassEvent.AfterRenderingSkybox;
+        cloudsBlitPass.renderPassEvent = RenderPassEvent.AfterRenderingSkybox;
     }
 
     public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
     {
-        renderer.EnqueuePass(cloudsPass);
-        renderer.EnqueuePass(blitPass);
+        renderer.EnqueuePass(cloudsRenderPass);
+        renderer.EnqueuePass(cloudsBlitPass);
     }
 
     protected override void Dispose(bool disposing)
     {
         if (Application.isPlaying)
         {
-            Destroy(blitMaterial);
+            Destroy(cloudsRenderMat);
+            Destroy(cloudsBlitMat);
         }
         else
         {
-            DestroyImmediate(blitMaterial);
+            DestroyImmediate(cloudsRenderMat);
+            DestroyImmediate(cloudsBlitMat);
         }
     }
 }
