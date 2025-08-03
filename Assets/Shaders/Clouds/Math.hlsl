@@ -1,14 +1,11 @@
-float remap(float oldValue, float oldMin, float oldMax, float newMin, float newMax) {
-    return newMin + ((( oldValue - oldMin ) / ( oldMax - oldMin )) * ( newMax - newMin ));
+float remap(float originalValue, float originalMin, float originalMax, float newMin, float newMax)
+{
+	return newMin + (((originalValue - originalMin) / (originalMax - originalMin)) * (newMax - newMin));
 }
 
 bool raySphereIntersection(float3 pos, float3 dir, float3 sphere_c, float sphere_r, out float2 t) {
     float3 l = sphere_c - pos;
     float tca = dot(l, dir);
-
-    if (tca < 0.0) {
-        return false;
-    }
 
     float d2 = dot(l, l) - tca * tca;
 

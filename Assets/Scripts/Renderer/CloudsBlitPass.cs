@@ -9,7 +9,8 @@ public class CloudsBlitPass : ScriptableRenderPass
 {
     private class PassData
     {
-        public TextureHandle cloudsRenderTex;
+        public TextureHandle writeTex;
+        public TextureHandle historyTex;
         public TextureHandle cameraColorTex;
     }
 
@@ -17,10 +18,18 @@ public class CloudsBlitPass : ScriptableRenderPass
     private const string finalPassName = "Volumetric Clouds Final Blit Pass";
     private const string tempTexName = "Volumetric Clouds Blit Temp Texture";
     private Material blitMat;
+    private RTHandle writeRT;
+    private RTHandle historyRT;
 
     public CloudsBlitPass(Material blitMat)
     {
         this.blitMat = blitMat;
+    }
+
+    public void SetRenderTargets(RTHandle writeRT, RTHandle historyRT)
+    {
+        this.writeRT = writeRT;
+        this.historyRT = historyRT;
     }
 
     public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
@@ -32,17 +41,19 @@ public class CloudsBlitPass : ScriptableRenderPass
             return;
         }
 
-        if (!frameData.Contains<CloudsRenderPass.CloudsRenderData>())
-        {
-            return;
-        }
+        // if (!frameData.Contains<CloudsRenderPass.CloudsRenderData>())
+        // {
+        //     return;
+        // }
 
-        CloudsRenderPass.CloudsRenderData renderData = frameData.Get<CloudsRenderPass.CloudsRenderData>();
+        // CloudsRenderPass.CloudsRenderData renderData = frameData.Get<CloudsRenderPass.CloudsRenderData>();
 
-        TextureHandle cloudsRenderTex = renderData.cloudsRenderTex;
+        // TextureHandle cloudsRenderTex = renderData.cloudsRenderTex;
         TextureHandle cameraColorTex = resourceData.activeColorTexture;
+        TextureHandle writeTex = renderGraph.ImportTexture(writeRT);
+        TextureHandle historyTex = renderGraph.ImportTexture(historyRT);
 
-        if (!cameraColorTex.IsValid() || !cloudsRenderTex.IsValid())
+        if (!cameraColorTex.IsValid() || !writeTex.IsValid())
         {
             return;
         }
@@ -54,11 +65,12 @@ public class CloudsBlitPass : ScriptableRenderPass
 
         using (var builder = renderGraph.AddRasterRenderPass<PassData>(tempPassName, out var passData, profilingSampler))
         {
-            // We have to draw to a temporary texture and blit the temp texture to the screen at the end since we 
-            // have to use builder.UseTexture (read only)
-            builder.UseTexture(cloudsRenderTex);
+            builder.UseTexture(writeTex);
+            builder.UseTexture(historyTex);
             builder.UseTexture(cameraColorTex);
-            passData.cloudsRenderTex = cloudsRenderTex;
+
+            passData.writeTex = writeTex;
+            passData.historyTex = historyTex;
             passData.cameraColorTex = cameraColorTex;
 
             builder.SetRenderAttachment(tempTex, 0);
@@ -66,11 +78,15 @@ public class CloudsBlitPass : ScriptableRenderPass
         }
 
         renderGraph.AddBlitPass(tempTex, cameraColorTex, Vector2.one, Vector2.zero, passName: finalPassName);
+
+        // RenderGraphUtils.BlitMaterialParameters blitParams = new(writeTex, cameraColorTex, blitMat, 0);
+        // renderGraph.AddBlitPass(blitParams, finalPassName);
     }
 
     void ExecutePass(PassData data, RasterGraphContext context)
     {
         blitMat.SetTexture("_CameraColor", data.cameraColorTex);
-        Blitter.BlitTexture(context.cmd, data.cloudsRenderTex, new Vector4(1, 1, 0, 0), blitMat, 0);
+        blitMat.SetTexture("_HistoryTex", data.historyTex);
+        Blitter.BlitTexture(context.cmd, data.writeTex, new Vector4(1, 1, 0, 0), blitMat, 0);
     }
 }

@@ -25,23 +25,34 @@ public class CloudsRenderPass : ScriptableRenderPass
     private const string renderPassName = "Volumetric Clouds Render Pass";
     private const string renderTexName = "Volumetric Clouds Render Texture";
     private Material renderMat;
-    private Texture3D cloudBase;
-    private Texture3D cloudDetail;
-    private Texture2D curlNoise;
-    private Texture2D densityLUT;
-    private Texture2D weatherData;
+    private RTHandle writeRT;
+    private RTHandle historyRT;
+    private CloudsRenderFeature.CloudsRenderFeatureSettings settings;
 
     public CloudsRenderPass(
-        Material renderMat,
-        Texture3D cloudBase, Texture3D cloudDetail, Texture2D curlNoise,
-        Texture2D densityLUT, Texture2D weatherData)
+        Material renderMat, CloudsRenderFeature.CloudsRenderFeatureSettings settings)
     {
         this.renderMat = renderMat;
-        this.cloudBase = cloudBase;
-        this.cloudDetail = cloudDetail;
-        this.curlNoise = curlNoise;
-        this.densityLUT = densityLUT;
-        this.weatherData = weatherData;
+        this.settings = settings;
+    }
+
+    private void UpdateMaterial()
+    {
+        renderMat.SetInt("_FrameCount", Time.frameCount);
+
+        renderMat.SetTexture("_CloudBase", settings.cloudBase);
+        renderMat.SetTexture("_CloudDetail", settings.cloudDetail);
+        renderMat.SetTexture("_CurlNoise", settings.curlNoise);
+        renderMat.SetTexture("_WeatherData", settings.weatherData);
+
+        renderMat.SetFloat("_DensityThreshold", settings.densityThreshold);
+        renderMat.SetFloat("_HighFreqNoiseStrength", settings.highFreqNoiseStrength);
+    }
+
+    public void SetRenderTargets(RTHandle writeRT, RTHandle historyRT)
+    {
+        this.writeRT = writeRT;
+        this.historyRT = historyRT;
     }
 
     public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
@@ -53,30 +64,27 @@ public class CloudsRenderPass : ScriptableRenderPass
             return;
         }
 
-        UniversalCameraData cameraData = frameData.Get<UniversalCameraData>();
-        var customData = frameData.Create<CloudsRenderData>();
+        // var customData = frameData.Create<CloudsRenderData>();
 
         TextureHandle cameraColorTex = resourceData.activeColorTexture;
         TextureHandle cameraDepthTex = resourceData.activeDepthTexture;
 
-        TextureDesc cloudsRenderTexDesc = cameraColorTex.GetDescriptor(renderGraph);
-        cloudsRenderTexDesc.name = renderTexName;
-        cloudsRenderTexDesc.width /= 2;
-        cloudsRenderTexDesc.height /= 2;
-        cloudsRenderTexDesc.depthBufferBits = 0;
-        cloudsRenderTexDesc.colorFormat = GraphicsFormat.R16G16B16A16_UNorm;
-        // cloudsRenderTexDesc.colorFormat = GraphicsFormat.R16G16B16A16_SFloat;
+        TextureHandle writeTex = renderGraph.ImportTexture(writeRT);
+        TextureHandle historyTex = renderGraph.ImportTexture(historyRT);
 
-        TextureHandle cloudsRenderTex = renderGraph.CreateTexture(cloudsRenderTexDesc);
-        customData.cloudsRenderTex = cloudsRenderTex;
+        // TextureDesc cloudsRenderTexDesc = cameraColorTex.GetDescriptor(renderGraph);
+        // cloudsRenderTexDesc.name = renderTexName;
+        // cloudsRenderTexDesc.width /= 2;
+        // cloudsRenderTexDesc.height /= 2;
+        // cloudsRenderTexDesc.depthBufferBits = 0;
+        // cloudsRenderTexDesc.colorFormat = GraphicsFormat.R16G16B16A16_UNorm;
 
-        renderMat.SetTexture("_CloudBase", cloudBase);
-        renderMat.SetTexture("_CloudDetail", cloudDetail);
-        renderMat.SetTexture("_CurlNoise", curlNoise);
-        renderMat.SetTexture("_DensityLUT", densityLUT);
-        renderMat.SetTexture("_WeatherData", weatherData);
+        // TextureHandle cloudsRenderTex = renderGraph.CreateTexture(cloudsRenderTexDesc);
+        // customData.cloudsRenderTex = cloudsRenderTex;
 
-        RenderGraphUtils.BlitMaterialParameters blitParams = new(cameraDepthTex, cloudsRenderTex, renderMat, 0);
+        UpdateMaterial();
+
+        RenderGraphUtils.BlitMaterialParameters blitParams = new(historyTex, writeTex, renderMat, 0);
         renderGraph.AddBlitPass(blitParams, renderPassName);
     }
 } 
