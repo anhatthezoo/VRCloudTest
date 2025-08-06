@@ -24,9 +24,8 @@ MonoBehaviour:
     probeSamplingDebugMesh: {fileID: 0}
     probeSamplingDebugTexture: {fileID: 0}
     probeVolumeBlendStatesCS: {fileID: 0}
-  m_RendererFeatures:
-  - {fileID: 7387017144210502177}
-  m_RendererFeatureMap: 2132635ef4f48366
+  m_RendererFeatures: []
+  m_RendererFeatureMap: 
   m_UseNativeRenderPass: 1
   xrSystemData: {fileID: 0}
   postProcessData: {fileID: 11400000, guid: 41439944d30ece34e96484bdb6645b55, type: 2}
@@ -52,25 +51,3 @@ MonoBehaviour:
   m_DepthTextureFormat: 0
   m_AccurateGbufferNormals: 0
   m_IntermediateTextureMode: 0
---- !u!114 &7387017144210502177
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 7335a08bb5cfb454e9847ce4aa787e9a, type: 3}
-  m_Name: CloudsRenderFeature
-  m_EditorClassIdentifier: 
-  m_Active: 1
-  settings:
-    renderShader: {fileID: 4800000, guid: 88d2adb90924bbb48909830f3878b1c5, type: 3}
-    blitShader: {fileID: 4800000, guid: 838adb7b09b8260498aede684db39499, type: 3}
-    cloudBase: {fileID: 11700000, guid: 93ee17daa65c10f4db62c12602f6a29f, type: 3}
-    cloudDetail: {fileID: 11700000, guid: 8470930d6909eeb43aac6ad7df2fa3fc, type: 3}
-    curlNoise: {fileID: 2800000, guid: fb69c60304b21ee49b5fa0fc633285c5, type: 3}
-    weatherData: {fileID: 2800000, guid: abb4e029c791b9c4ab82c5bdbe5ca1cd, type: 3}
-    densityThreshold: 0
-    highFreqNoiseStrength: 0.0076

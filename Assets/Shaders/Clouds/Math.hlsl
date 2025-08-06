@@ -1,3 +1,5 @@
+// #define PI 3.14159265359
+
 float remap(float originalValue, float originalMin, float originalMax, float newMin, float newMax)
 {
 	return newMin + (((originalValue - originalMin) / (originalMax - originalMin)) * (newMax - newMin));
@@ -43,12 +45,4 @@ bool rayPlaneIntersection(float3 n, float3 p0, float3 rayOrigin, float3 rayDir, 
     }
 
     return false;
-}
-
-float calculateScatterIntergral(float opticalDepth, float coeff){
-    float a = -coeff * (1.0 / log(2.0));
-    float b = -1.0 / coeff;
-    float c =  1.0 / coeff;
-
-    return exp2(a * opticalDepth) * b + c;
 }
